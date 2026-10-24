@@ -1,0 +1,162 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  ADMIN         // full access + user management + audit log
+  STOCK_MANAGER // manage items, receive stock, adjust, approve, expire lots
+  STAFF         // view stock and dispense/withdraw
+}
+
+enum InventoryCategory {
+  DRUG
+  SUPPLY
+}
+
+enum TransactionType {
+  IN_PURCHASE
+  IN_DONATION
+  OUT_PRESCRIPTION
+  OUT_SUPPLY
+  ADJ_APPROVED
+  OUT_EXPIRED
+}
+
+enum AdjStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+model Organization {
+  id             String          @id @default(uuid())
+  name           String
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  users          User[]
+  inventoryItems InventoryItem[]
+  auditLogs      AuditLog[]
+}
+
+model User {
+  id             String       @id @default(uuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  email          String       @unique
+  passwordHash   String
+  role           UserRole
+  displayName    String
+  phone          String?
+  isActive       Boolean      @default(true)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  auditLogs           AuditLog[]         @relation("AuditActor")
+  stockTransactions   StockTransaction[] @relation("StockActor")
+  adjRequestsMade     AdjRequest[]       @relation("AdjRequester")
+  adjRequestsReviewed AdjRequest[]       @relation("AdjReviewer")
+  lotsReceived        InventoryLot[]     @relation("LotReceiver")
+  lotsExpired         InventoryLot[]     @relation("LotExpirer")
+}
+
+model InventoryItem {
+  id                String            @id @default(uuid())
+  organizationId    String
+  organization      Organization      @relation(fields: [organizationId], references: [id])
+  name              String
+  unit              String
+  category          InventoryCategory
+  currentStock      Int               @default(0)
+  lowStockThreshold Int               @default(10)
+  isActive          Boolean           @default(true)
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+
+  transactions StockTransaction[]
+  adjRequests  AdjRequest[]
+  lots         InventoryLot[]
+
+  @@index([organizationId, isActive])
+}
+
+model StockTransaction {
+  id           String          @id @default(uuid())
+  itemId       String
+  item         InventoryItem   @relation(fields: [itemId], references: [id])
+  type         TransactionType
+  quantity     Int
+  balanceAfter Int
+  // Free-text reference to who/what the stock went to (e.g. patient HN, event, department).
+  // Replaces poc_homeless' patientId/eventId foreign keys so the app stands alone.
+  reference    String?
+  actorId      String
+  actor        User            @relation("StockActor", fields: [actorId], references: [id])
+  donorName    String?
+  receiptNo    String?
+  unitCost     Float?
+  reason       String?
+  lotId        String?
+  lot          InventoryLot?   @relation(fields: [lotId], references: [id])
+  createdAt    DateTime        @default(now())
+
+  @@index([itemId, createdAt(sort: Desc)])
+}
+
+model AdjRequest {
+  id            String        @id @default(uuid())
+  itemId        String
+  item          InventoryItem @relation(fields: [itemId], references: [id])
+  requestedById String
+  requester     User          @relation("AdjRequester", fields: [requestedById], references: [id])
+  quantity      Int
+  reason        String
+  status        AdjStatus     @default(PENDING)
+  reviewedById  String?
+  reviewer      User?         @relation("AdjReviewer", fields: [reviewedById], references: [id])
+  reviewNote    String?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+}
+
+model InventoryLot {
+  id          String        @id @default(uuid())
+  itemId      String
+  item        InventoryItem @relation(fields: [itemId], references: [id])
+  quantity    Int
+  remaining   Int
+  expiryDate  DateTime
+  receivedAt  DateTime      @default(now())
+  receiptNo   String?
+  donorName   String?
+  unitCost    Float?
+  actorId     String
+  actor       User          @relation("LotReceiver", fields: [actorId], references: [id])
+  isExpired   Boolean       @default(false)
+  expiredAt   DateTime?
+  expiredById String?
+  expiredBy   User?         @relation("LotExpirer", fields: [expiredById], references: [id])
+
+  transactions StockTransaction[]
+
+  @@index([itemId, expiryDate])
+}
+
+model AuditLog {
+  id             String       @id @default(uuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  actorId        String
+  actor          User         @relation("AuditActor", fields: [actorId], references: [id])
+  action         String
+  entity         String
+  entityId       String?
+  detail         String?
+  createdAt      DateTime     @default(now())
+
+  @@index([organizationId, createdAt(sort: Desc)])
+}

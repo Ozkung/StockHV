@@ -1,0 +1,4 @@
+html, body { margin: 0; padding: 0; }
+body { font-family: 'Sarabun', sans-serif; background: #f0f2f5; }
+.row-low-stock td { background: #fff1f0 !important; }
+.row-muted td { color: #bfbfbf; }
